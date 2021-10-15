@@ -264,7 +264,7 @@ void setup()
 void loop()
 {
 	// 
-	if(step_speed_pulse > 0) {
+	if(motorOn) {
 		if((millis() - step_last_pulse) > step_speed_pulse) {
 			digitalWrite(directionPin, HIGH);
 			digitalWrite(stepPin, HIGH);
@@ -313,7 +313,7 @@ void loop()
 			temperatureDesired++;
 		}
 		else if(buttonIndicatorLocation == 1) {// Motor
-			step_speed_pulse += 25;
+			step_speed_pulse += 1;
 		}
 	} 
 
@@ -324,7 +324,7 @@ void loop()
 			temperatureDesired--;
 		}
 		else if(buttonIndicatorLocation == 1) { // Motor
-			step_speed_pulse -= 25;
+			step_speed_pulse -= 1;
 			if(step_speed_pulse < 0) {
 				step_speed_pulse = 0;
 			}
