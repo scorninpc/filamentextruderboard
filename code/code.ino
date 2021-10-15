@@ -4,17 +4,10 @@
  */
 
 #include <LiquidCrystal.h>
-
 #include "Button.h"
-
+#include <PID.h>
 #include <thermistor.h>
 
-/**
-
-DEIXAR AS TRILHAS MAIS DISTANTES ENTRE ELAS
-DEIXAR OS PADS MAIORES
-
- */
 
 // Define PINS
 #define THERMISTOR_PIN A0
@@ -26,7 +19,7 @@ DEIXAR OS PADS MAIORES
 #define LCD_D6_PIN 3
 #define LCD_D7_PIN 2
 
-#define HEATER_PIN 8
+#define HEATER_PIN 11
 
 #define BTN_PLUS A4
 #define BTN_MINUS A3
@@ -37,6 +30,10 @@ DEIXAR OS PADS MAIORES
 thermistor thermistor1(THERMISTOR_PIN, 60);	// 60 or 11
 int temperatureDesired = 35;
 int temperatureCurrent = 0;
+int heaterValue = 0;
+bool heaterOn = false;
+
+arc::PID<double> temperaturePid(1.0, 0.0, 0.0);
 
 // LCD
 LiquidCrystal lcd(LCD_RS_PIN, LCD_EN_PIN, LCD_D4_PIN, LCD_D5_PIN, LCD_D6_PIN, LCD_D7_PIN);
@@ -65,7 +62,7 @@ byte customGraus[] = {
 };
 
 // Button
-Button btn_enter(BTN_ENTER);
+Button btn_enter(BTN_ENTER, 3000);
 Button btn_minus(BTN_MINUS);
 Button btn_plus(BTN_PLUS);
 
@@ -98,10 +95,20 @@ void refreshLCD()
 		lcd.setCursor(4, 0);
 	lcd.write(byte(1));
 
-	lcd.setCursor(10, 0);
+	if(temperatureCurrent >= 100) 
+		lcd.setCursor(10, 0);
+	else 
+		lcd.setCursor(11, 0);
+	
 	lcd.print(temperatureDesired);
 	lcd.setCursor(13, 0);
 	lcd.write(byte(1));
+
+	// On/Off
+	if(heaterOn) {
+		lcd.setCursor(15, 0);
+		lcd.print("*");
+	}
 	
 
 	// Store time as last refresh
@@ -116,14 +123,24 @@ void refreshLCD()
 unsigned char ledValue = 0;
 void temperaturePID()
 {
-	if(temperatureCurrent < temperatureDesired) {
-		digitalWrite(HEATER_PIN, HIGH);
+	// Verify if heater is on
+	if(!heaterOn) {
+		return;
 	}
-	else {
-		digitalWrite(HEATER_PIN, LOW);
-	}
-}
 
+	// if(temperatureCurrent < temperatureDesired) {
+	// 	digitalWrite(HEATER_PIN, HIGH);
+	// }
+	// else {
+	// 	digitalWrite(HEATER_PIN, LOW);
+	// }
+
+
+	temperaturePid.setTarget(temperatureDesired);
+	temperaturePid.setInput(temperatureCurrent);
+	heaterValue = min(255,max(0,heaterValue + temperaturePid.getOutput()));
+	analogWrite(HEATER_PIN, heaterValue);
+}
 
 /**
  * Setup
@@ -180,6 +197,9 @@ void loop()
 			buttonIndicatorLocation = 1;
 		}
 	} 
+	else if (btn1 == -1) {
+		heaterOn = !heaterOn;
+	}
 
 	// Handle button UP
 	short btn2 = btn_plus.checkPress();
