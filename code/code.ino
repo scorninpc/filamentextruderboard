@@ -4,9 +4,10 @@
  */
 
 #include <LiquidCrystal.h>
-#include "Button.h"
 #include <PID.h>
 #include <thermistor.h>
+#include <EEPROM.h>
+#include "Button.h"
 
 
 // Define PINS
