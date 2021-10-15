@@ -26,6 +26,13 @@
 #define BTN_MINUS A3
 #define BTN_ENTER A5
 
+// Config to store on eeprom
+struct MyConfig {
+	int temperature;
+	unsigned long motor;
+	unsigned long saved;
+};
+struct MyConfig eepromConfig = (MyConfig){ 35, 0, 0};
 
 // Thermistor
 thermistor thermistor1(THERMISTOR_PIN, 60);	// 60 or 11
@@ -62,6 +69,50 @@ byte customGraus[] = {
 	0x00
 };
 
+byte customOff[] = {
+	0x04,
+	0x0A,
+	0x0A,
+	0x0A,
+	0x0A,
+	0x11,
+	0x1F,
+	0x0E
+};
+
+byte customOn[] = {
+	0x04,
+	0x0E,
+	0x0E,
+	0x0E,
+	0x0E,
+	0x1F,
+	0x1F,
+	0x0E
+};
+
+byte customMotorOff[] = {
+	0x00,
+	0x00,
+	0x04,
+	0x1F,
+	0x11,
+	0x11,
+	0x1F,
+	0x00
+};
+
+byte customMotorOn[] = {
+	0x00,
+	0x00,
+	0x04,
+	0x1F,
+	0x1D,
+	0x17,
+	0x1F,
+	0x00
+};
+
 // Button
 Button btn_enter(BTN_ENTER, 3000);
 Button btn_minus(BTN_MINUS);
@@ -75,6 +126,7 @@ byte stepPin = 9;
 int numberOfSteps = 100;
 unsigned long step_last_pulse = 0;
 unsigned long step_speed_pulse = 0;
+bool motorOn = false;
 
 /**
  * Refresh LCD screen
@@ -88,28 +140,57 @@ void refreshLCD()
 	lcd.write(byte(0));
 
 	// Temperature
-	lcd.setCursor(2, 0);
-	lcd.print(temperatureCurrent);
-	if(temperatureCurrent >= 100) 
-		lcd.setCursor(5, 0);
-	else 
-		lcd.setCursor(4, 0);
-	lcd.write(byte(1));
+	// lcd.setCursor(2, 0);
+	lcd.setCursor(1, 0);
+	lcd.print(" ");
+	if(heaterOn) {
+		lcd.write(byte(2));
+	}
+	else {
+		lcd.write(byte(3));
+	}
 
-	if(temperatureCurrent >= 100) 
-		lcd.setCursor(10, 0);
-	else 
-		lcd.setCursor(11, 0);
+	lcd.print(" ");
+	lcd.print(temperatureCurrent);
+	// if(temperatureCurrent >= 100) 
+	// 	lcd.setCursor(5, 0);
+	// else 
+	// 	lcd.setCursor(4, 0);
+	// lcd.write(byte(1));
+
+	// if(temperatureCurrent >= 100) 
+	// 	lcd.setCursor(10, 0);
+	// else 
+	// 	lcd.setCursor(11, 0);
 	
+	lcd.print("/");
 	lcd.print(temperatureDesired);
-	lcd.setCursor(13, 0);
 	lcd.write(byte(1));
+	// lcd.setCursor(13, 0);
+	// lcd.write(byte(1));
 
 	// On/Off
-	if(heaterOn) {
-		lcd.setCursor(15, 0);
-		lcd.print("*");
+	// lcd.setCursor(15, 0);
+	// if(heaterOn) {
+	// 	lcd.write(byte(2));
+	// }
+	// else {
+	// 	lcd.write(byte(3));
+	// }
+
+
+
+	// Linha 2
+	lcd.setCursor(1, 1);
+	lcd.print(" ");
+	if(motorOn) {
+		lcd.write(byte(5));
 	}
+	else {
+		lcd.write(byte(4));
+	}
+	lcd.print(" ");
+	lcd.print(step_speed_pulse);
 	
 
 	// Store time as last refresh
@@ -126,6 +207,7 @@ void temperaturePID()
 {
 	// Verify if heater is on
 	if(!heaterOn) {
+		analogWrite(HEATER_PIN, 0);
 		return;
 	}
 
@@ -160,7 +242,18 @@ void setup()
 	lcd.begin(16, 2);
 	lcd.createChar(0, customArrow);
 	lcd.createChar(1, customGraus);
+	lcd.createChar(2, customOn);
+	lcd.createChar(3, customOff);
+	lcd.createChar(4, customMotorOff);
+	lcd.createChar(5, customMotorOn);
 	lcd.clear();
+
+	//
+	EEPROM.get(0x0, eepromConfig);
+	if(eepromConfig.saved == 1) {
+		step_speed_pulse = eepromConfig.motor;
+		temperatureDesired = eepromConfig.temperature;
+	}
 }
 
 
@@ -199,25 +292,43 @@ void loop()
 		}
 	} 
 	else if (btn1 == -1) {
-		heaterOn = !heaterOn;
+		if(buttonIndicatorLocation == 1) {
+			motorOn = !motorOn;
+		}
+		else if(buttonIndicatorLocation == 0) {
+			heaterOn = !heaterOn;
+		}
+		
+		eepromConfig.motor = step_speed_pulse;
+		eepromConfig.temperature = temperatureDesired;
+		eepromConfig.saved = 1;
+
+		EEPROM.put(0x0, eepromConfig);
 	}
 
 	// Handle button UP
 	short btn2 = btn_plus.checkPress();
 	if (btn2 == 1) {
-		if(buttonIndicatorLocation == 0) // Temperature
+		if(buttonIndicatorLocation == 0) {// Temperature
 			temperatureDesired++;
-		else if(buttonIndicatorLocation == 1) // Motor
+		}
+		else if(buttonIndicatorLocation == 1) {// Motor
 			step_speed_pulse += 25;
+		}
 	} 
 
 	// Handle button DOWN
 	short btn3 = btn_minus.checkPress();
 	if (btn3 == 1) {
-		if(buttonIndicatorLocation == 0) // Temperature
+		if(buttonIndicatorLocation == 0) {// Temperature
 			temperatureDesired--;
-		else if(buttonIndicatorLocation == 1) // Motor
+		}
+		else if(buttonIndicatorLocation == 1) { // Motor
 			step_speed_pulse -= 25;
+			if(step_speed_pulse < 0) {
+				step_speed_pulse = 0;
+			}
+		}
 	}
 
 	// Refresh screen
