@@ -5,7 +5,6 @@
 
 #include <LiquidCrystal.h>
 #include <PID.h>
-#include <thermistor.h>
 #include <EEPROM.h>
 #include "Button.h"
 #include <AccelStepper.h>
@@ -36,7 +35,6 @@ struct MyConfig {
 struct MyConfig eepromConfig = (MyConfig){ 35, 0, 0};
 
 // Thermistor
-thermistor thermistor1(THERMISTOR_PIN, 80);
 int temperatureDesired = 35;
 int temperatureCurrent = 0;
 int heaterValue = 0;
@@ -186,17 +184,19 @@ void refreshLCD()
 unsigned char ledValue = 0;
 void temperaturePID()
 {
+	// Control PID
+	temperaturePid.setTarget(temperatureDesired);
+	temperaturePid.setInput(temperatureCurrent);
+	heaterValue = min(255,max(0,heaterValue + temperaturePid.getOutput()));
+	
 	// Verify if heater is on
 	if(!heaterOn) {
 		analogWrite(HEATER_PIN, 0);
 		return;
 	}
-
-	// Control PID
-	temperaturePid.setTarget(temperatureDesired);
-	temperaturePid.setInput(temperatureCurrent);
-	heaterValue = min(255,max(0,heaterValue + temperaturePid.getOutput()));
-	analogWrite(HEATER_PIN, heaterValue);
+	else {
+		analogWrite(HEATER_PIN, heaterValue);
+	}
 }
 
 /**
@@ -272,7 +272,7 @@ void loop()
 {
 	// Store current temperature and Control temp PID
 	rawtemp = rawtemp + analogRead(THERMISTOR_PIN) / 2;
-	if((millis() - temperature_last_fetch) > 300) {
+	if((millis() - temperature_last_fetch) > 50) {
 		i++;
 		if(i<NUMTEMPS) {
 			rawtemp = analogRead(THERMISTOR_PIN);
