@@ -1,6 +1,6 @@
 /**
- * arduino-cli compile --fqbn arduino:avr:uno sketch_sep17a
- * arduino-cli upload --fqbn arduino:avr:uno sketch_sep17a
+ * arduino-cli compile --fqbn arduino:avr:uno code
+ * arduino-cli upload -p /dev/ttyUSB0  --fqbn arduino:avr:uno code
  */
 
 #include <LiquidCrystal.h>
@@ -8,6 +8,7 @@
 #include <thermistor.h>
 #include <EEPROM.h>
 #include "Button.h"
+#include <AccelStepper.h>
 
 
 // Define PINS
@@ -35,13 +36,13 @@ struct MyConfig {
 struct MyConfig eepromConfig = (MyConfig){ 35, 0, 0};
 
 // Thermistor
-thermistor thermistor1(THERMISTOR_PIN, 60);	// 60 or 11
+thermistor thermistor1(THERMISTOR_PIN, 80);
 int temperatureDesired = 35;
 int temperatureCurrent = 0;
 int heaterValue = 0;
 bool heaterOn = false;
 
-arc::PID<double> temperaturePid(1.0, 0.0, 0.0);
+arc::PID<double> temperaturePid(1.0, 0.05, 0.25);
 
 // LCD
 LiquidCrystal lcd(LCD_RS_PIN, LCD_EN_PIN, LCD_D4_PIN, LCD_D5_PIN, LCD_D6_PIN, LCD_D7_PIN);
@@ -114,7 +115,7 @@ byte customMotorOn[] = {
 };
 
 // Button
-Button btn_enter(BTN_ENTER, 3000);
+Button btn_enter(BTN_ENTER, 1000);
 Button btn_minus(BTN_MINUS);
 Button btn_plus(BTN_PLUS);
 
@@ -128,6 +129,9 @@ unsigned long step_last_pulse = 0;
 unsigned long step_speed_pulse = 0;
 bool motorOn = false;
 
+int motorSpeed = 1000;
+AccelStepper stepper = AccelStepper(1, stepPin, directionPin);
+
 /**
  * Refresh LCD screen
  */
@@ -139,8 +143,7 @@ void refreshLCD()
 	lcd.setCursor(0, buttonIndicatorLocation);
 	lcd.write(byte(0));
 
-	// Temperature
-	// lcd.setCursor(2, 0);
+	// Line 1
 	lcd.setCursor(1, 0);
 	lcd.print(" ");
 	if(heaterOn) {
@@ -152,35 +155,12 @@ void refreshLCD()
 
 	lcd.print(" ");
 	lcd.print(temperatureCurrent);
-	// if(temperatureCurrent >= 100) 
-	// 	lcd.setCursor(5, 0);
-	// else 
-	// 	lcd.setCursor(4, 0);
-	// lcd.write(byte(1));
 
-	// if(temperatureCurrent >= 100) 
-	// 	lcd.setCursor(10, 0);
-	// else 
-	// 	lcd.setCursor(11, 0);
-	
 	lcd.print("/");
 	lcd.print(temperatureDesired);
 	lcd.write(byte(1));
-	// lcd.setCursor(13, 0);
-	// lcd.write(byte(1));
 
-	// On/Off
-	// lcd.setCursor(15, 0);
-	// if(heaterOn) {
-	// 	lcd.write(byte(2));
-	// }
-	// else {
-	// 	lcd.write(byte(3));
-	// }
-
-
-
-	// Linha 2
+	// Line 2
 	lcd.setCursor(1, 1);
 	lcd.print(" ");
 	if(motorOn) {
@@ -190,7 +170,8 @@ void refreshLCD()
 		lcd.write(byte(4));
 	}
 	lcd.print(" ");
-	lcd.print(step_speed_pulse);
+	// lcd.print(step_speed_pulse);
+	lcd.print(motorSpeed);
 	
 
 	// Store time as last refresh
@@ -211,14 +192,7 @@ void temperaturePID()
 		return;
 	}
 
-	// if(temperatureCurrent < temperatureDesired) {
-	// 	digitalWrite(HEATER_PIN, HIGH);
-	// }
-	// else {
-	// 	digitalWrite(HEATER_PIN, LOW);
-	// }
-
-
+	// Control PID
 	temperaturePid.setTarget(temperatureDesired);
 	temperaturePid.setInput(temperatureCurrent);
 	heaterValue = min(255,max(0,heaterValue + temperaturePid.getOutput()));
@@ -230,13 +204,11 @@ void temperaturePID()
  */
 void setup()
 {
-	// Step motor
-	pinMode(directionPin, OUTPUT);
-	pinMode(stepPin, OUTPUT);
+	
 
 	// Heater
 	pinMode(HEATER_PIN, OUTPUT);
-	// digitalWrite(HEATER_PIN, LOW);
+	digitalWrite(HEATER_PIN, LOW);
 
 	// Start LCD and custom chars
 	lcd.begin(16, 2);
@@ -251,35 +223,79 @@ void setup()
 	//
 	EEPROM.get(0x0, eepromConfig);
 	if(eepromConfig.saved == 1) {
-		step_speed_pulse = eepromConfig.motor;
+		motorSpeed = eepromConfig.motor;
 		temperatureDesired = eepromConfig.temperature;
 	}
+
+
+	// Step motor
+	stepper.setMaxSpeed(1500);
 }
 
 
+#define NUMTEMPS 20
+short temptable[NUMTEMPS][2] = {
+   {1, 841},
+   {54, 255},
+   {107, 209},
+   {160, 184},
+   {213, 166},
+   {266, 153},
+   {319, 142},
+   {372, 132},
+   {425, 124},
+   {478, 116},
+   {531, 108},
+   {584, 101},
+   {637, 93},
+   {690, 86},
+   {743, 78},
+   {796, 70},
+   {849, 61},
+   {902, 50},
+   {955, 34},
+   {1008, 3}
+};
+int rawtemp = 0;
+int current_celsius = 0;
+byte i = 0;
+unsigned long temperature_last_fetch = 0;
+
+
+
+#define SERIESRESISTOR 4700   
 
 /**
  * Loop
  */
 void loop()
 {
-	// 
-	if(motorOn) {
-		if((millis() - step_last_pulse) > step_speed_pulse) {
-			digitalWrite(directionPin, HIGH);
-			digitalWrite(stepPin, HIGH);
-			digitalWrite(stepPin, LOW);
-			digitalWrite(directionPin, LOW);
-
-			step_last_pulse = millis();
+	// Store current temperature and Control temp PID
+	rawtemp = rawtemp + analogRead(THERMISTOR_PIN) / 2;
+	if((millis() - temperature_last_fetch) > 300) {
+		i++;
+		if(i<NUMTEMPS) {
+			rawtemp = analogRead(THERMISTOR_PIN);
+			if (temptable[i][0] > rawtemp) {
+				temperatureCurrent  = (int)temptable[i-1][1] + (rawtemp - temptable[i-1][0]) * (temptable[i][1] - temptable[i-1][1]) / (temptable[i][0] - temptable[i-1][0]);
+				i=0;
+				rawtemp = 0;
+			}
 		}
+		else {
+			i=0;
+		}
+
+		// Store time as last refresh
+		temperature_last_fetch = millis();
 	}
-
-	// Store current temperature
-	temperatureCurrent = (int)thermistor1.analog2temp();
-
-	// Control temp PID
 	temperaturePID();
+
+
+	// Pulse motor
+	if(motorOn) {
+		stepper.runSpeed();
+	}
 
 	// Handle button ENTER
 	short btn1 = btn_enter.checkPress();
@@ -294,12 +310,14 @@ void loop()
 	else if (btn1 == -1) {
 		if(buttonIndicatorLocation == 1) {
 			motorOn = !motorOn;
+			stepper.setSpeed(motorSpeed);
 		}
 		else if(buttonIndicatorLocation == 0) {
 			heaterOn = !heaterOn;
+			stepper.setSpeed(motorSpeed);
 		}
 		
-		eepromConfig.motor = step_speed_pulse;
+		eepromConfig.motor = motorSpeed;
 		eepromConfig.temperature = temperatureDesired;
 		eepromConfig.saved = 1;
 
@@ -313,7 +331,8 @@ void loop()
 			temperatureDesired++;
 		}
 		else if(buttonIndicatorLocation == 1) {// Motor
-			step_speed_pulse += 1;
+			motorSpeed+=50;
+			stepper.setSpeed(motorSpeed);
 		}
 	} 
 
@@ -324,10 +343,12 @@ void loop()
 			temperatureDesired--;
 		}
 		else if(buttonIndicatorLocation == 1) { // Motor
-			step_speed_pulse -= 1;
-			if(step_speed_pulse < 0) {
-				step_speed_pulse = 0;
+			motorSpeed-=50;
+			if(motorSpeed < 0) {
+				motorSpeed = 0;
 			}
+
+			stepper.setSpeed(motorSpeed);
 		}
 	}
 
@@ -336,11 +357,3 @@ void loop()
 		refreshLCD();
 	}
 }
-
-/**
- 
-
-260
-
-
- */
