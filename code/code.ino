@@ -259,6 +259,7 @@ short temptable[NUMTEMPS][2] = {
 int rawtemp = 0;
 int current_celsius = 0;
 byte i = 0;
+byte temperature_times = 0;
 unsigned long temperature_last_fetch = 0;
 
 
@@ -271,8 +272,14 @@ unsigned long temperature_last_fetch = 0;
 void loop()
 {
 	// Store current temperature and Control temp PID
-	rawtemp = rawtemp + analogRead(THERMISTOR_PIN) / 2;
-	if((millis() - temperature_last_fetch) > 50) {
+	rawtemp = rawtemp + analogRead(THERMISTOR_PIN);
+	temperature_times++;
+	// if((millis() - temperature_last_fetch) > 50) {
+	if(temperature_times >= 5) {
+
+		temperature_times = 0;
+		rawtemp = rawtemp / 5;
+
 		i++;
 		if(i<NUMTEMPS) {
 			rawtemp = analogRead(THERMISTOR_PIN);
@@ -287,7 +294,7 @@ void loop()
 		}
 
 		// Store time as last refresh
-		temperature_last_fetch = millis();
+		// temperature_last_fetch = millis();
 	}
 	temperaturePID();
 
